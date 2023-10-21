@@ -1,0 +1,128 @@
+import math
+import sys
+from controller import Robot, DistanceSensor
+from collections import deque
+# Import Fuzzy Logic Library
+import numpy as np
+import skfuzzy as fuzz
+from skfuzzy import control as ctrl
+
+robot = Robot()
+
+# Meaning of the motor characters:
+# - 'R': Right / 'L': Left
+# - 'A': Front / 'M': Middle / 'P': Rear
+# - 'C': Base / 'F': Shoulder / 'T': Knee
+motors = [
+    robot.getDevice('RPC'), robot.getDevice('RPF'), robot.getDevice('RPT'),
+    robot.getDevice('RMC'), robot.getDevice('RMF'), robot.getDevice('RMT'),
+    robot.getDevice('RAC'), robot.getDevice('RAF'), robot.getDevice('RAT'),
+    robot.getDevice('LPC'), robot.getDevice('LPF'), robot.getDevice('LPT'),
+    robot.getDevice('LMC'), robot.getDevice('LMF'), robot.getDevice('LMT'),
+    robot.getDevice('LAC'), robot.getDevice('LAF'), robot.getDevice('LAT')
+]
+
+# Get DistanceSensor
+kanan = robot.getDevice("DistanceSensor1")
+kanan.enable(10)
+depan = robot.getDevice("DistanceSensor2")
+depan.enable(10)
+    
+# The parameters for a simple walking gait have been found empirically.
+time_step = int(robot.getBasicTimeStep())
+
+# Set up the fuzzy logic controller
+sensor_kanan = ctrl.Antecedent(np.arange(0, 1001, 1), 'sensor_kanan')
+turn = ctrl.Consequent(np.arange(-3, 11, 0.1), 'turn')
+
+# Membership Functions
+sensor_kanan['normal'] = fuzz.trimf(sensor_kanan.universe, [0, 0, 250])
+sensor_kanan['slightly_close'] = fuzz.trimf(sensor_kanan.universe, [0, 250, 500])
+sensor_kanan['close_enough'] = fuzz.trimf(sensor_kanan.universe, [250, 500, 750])
+sensor_kanan['close'] = fuzz.trimf(sensor_kanan.universe, [500, 750, 1000])
+sensor_kanan['too_close'] = fuzz.trimf(sensor_kanan.universe, [750, 1000, 1000])
+
+turn['straight'] = fuzz.trimf(turn.universe, [0, 0, 2])
+turn['slightly_left'] = fuzz.trimf(turn.universe, [0, 2, 4])
+turn['left'] = fuzz.trimf(turn.universe, [2, 4, 6])
+turn['sharp_left'] = fuzz.trimf(turn.universe, [4, 6, 8])
+turn['very_left'] = fuzz.trimf(turn.universe, [6, 8, 8])
+
+# Rule Base
+rule1 = ctrl.Rule(sensor_kanan['slightly_close'], turn['slightly_left'])
+rule2 = ctrl.Rule(sensor_kanan['close_enough'], turn['left'])
+rule3 = ctrl.Rule(sensor_kanan['close'], turn['sharp_left'])
+rule4 = ctrl.Rule(sensor_kanan['too_close'], turn['very_left'])
+rule5 = ctrl.Rule(sensor_kanan['normal'], turn['straight'])
+
+# Control System
+robot_ctrl = ctrl.ControlSystem([rule1, rule2, rule3, rule4, rule5])
+robot_sim = ctrl.ControlSystemSimulation(robot_ctrl)
+
+# Wall Following Control Loop
+while robot.step(time_step) != -1:
+    #sensor reading
+    jarak_kanan = kanan.getValue()
+    jarak_depan = depan.getValue()
+    print("jarak kanan : ", jarak_kanan)
+    print("jarak depan : ", jarak_depan)
+   
+    # Set input values for fuzzy logic controller
+    robot_sim.input['sensor_kanan'] = jarak_kanan
+    
+    # Perform fuzzy logic computation
+    robot_sim.compute()
+    
+    # Get output values from fuzzy logic controller
+    output_turn = robot_sim.output['turn']
+    print("defuzzifikasi : ", output_turn)
+    
+    ka = output_turn / 10
+    
+    # frequency [Hz]
+    f = 0.5
+    
+    # amplitudo 
+    aC = 0.25  # Mengubah amplitudo "base" motors menjadi negatif.
+    aF = 0.2    # Tetap menggunakan amplitudo yang sama untuk "shoulder" motors.
+    aT = 0.05  # Mengubah amplitudo "knee" motors menjadi negatif.
+    a = [aC, aF, -aT, -aC, -aF, aT, aC, aF, -aT, aC, -aF, aT, -aC, aF, -aT, aC, -aF, aT]
+
+    # amplitudo kanan
+    aRC = 0.25  # Mengubah amplitudo "base" motors menjadi negatif.
+    aRF = 0.2    # Tetap menggunakan amplitudo yang sama untuk "shoulder" motors.
+    aRT = 0.05  # Mengubah amplitudo "knee" motors menjadi negatif.
+    aR = [aRC, aRF, -aRT, -aRC, -aRF, aRT, aRC, aRF, -aRT, ka*aRC, -aRF, aRT, ka*-aRC, aRF, -aRT, ka*aRC, -aRF, aRT]
+    
+    # amplitudo kiri
+    aLC = 0.25  # Mengubah amplitudo "base" motors menjadi negatif.
+    aLF = 0.2    # Tetap menggunakan amplitudo yang sama untuk "shoulder" motors.
+    aLT = 0.05  # Mengubah amplitudo "knee" motors menjadi negatif.
+    aL = [aLC, aLF, -aLT, aLC, -aLF, aLT, aLC, aLF, -aLT, ka*aLC, -aLF, aLT, ka*-aLC, aLF, -aLT, ka*aLC, -aLF, aLT]
+    
+    # phase [s]
+    pC = 0.0   # Phase for the "base" motors.
+    pF = 2.0   # Phase for the "shoulder" motors.
+    pT = 2.5   # Phase for the "knee" motors.
+    p = [pC, pF, pT, pC, pF, pT, pC, pF, pT, pC, pF, pT, pC, pF, pT, pC, pF, pT]
+    
+    # offset [rad]
+    dC = 0.6    # Offset for the "base" motors.
+    dF = 0.8    # Offset for the "shoulder" motors.
+    dT = -2.4   # Offset for the "knee" motors.
+    d = [-dC, dF, dT, 0.0, dF, dT, dC, dF, dT, dC, dF, dT, 0.0, dF, dT, -dC, dF, dT]
+    
+    time = robot.getTime()
+   
+    # Wall following control logi 
+    if jarak_kanan <= 250:
+        for i in range(18):
+            lurus = a[i] * math.sin(2.0 * math.pi * f * time + p[i]) + d[i]
+            motors[i].setPosition(lurus)
+        print("lurus : ", lurus)
+    else:
+        for i in range(18):
+            kiri = aR[i] * math.sin(2.0 * math.pi * f * time + p[i]) + d[i]
+            motors[i].setPosition(kiri)
+        print("belok kiri : ", kiri)
+    
