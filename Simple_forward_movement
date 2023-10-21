@@ -1,0 +1,48 @@
+import math
+import sys
+from controller import Robot
+
+robot = Robot()
+
+# Meaning of the motor characters:
+# - 'R': Right / 'L': Left
+# - 'A': Front / 'M': Middle / 'P': Rear
+# - 'C': Base / 'F': Shoulder / 'T': Knee
+motors = [
+    robot.getDevice('RPC'), robot.getDevice('RPF'), robot.getDevice('RPT'),
+    robot.getDevice('RMC'), robot.getDevice('RMF'), robot.getDevice('RMT'),
+    robot.getDevice('RAC'), robot.getDevice('RAF'), robot.getDevice('RAT'),
+    robot.getDevice('LPC'), robot.getDevice('LPF'), robot.getDevice('LPT'),
+    robot.getDevice('LMC'), robot.getDevice('LMF'), robot.getDevice('LMT'),
+    robot.getDevice('LAC'), robot.getDevice('LAF'), robot.getDevice('LAT')
+]
+
+# The parameters for a simple walking gate have been found empirically.
+
+# frequency [Hz]
+f = 0.5
+
+# amplitude [rad]
+aC = 0.25  # Amplitude for the "base" motors.
+aF = 0.2   # Amplitude for the "shoulder" motors.
+aT = 0.05  # Amplitude for the "knee" motors.
+a = [aC, aF, -aT, -aC, -aF, aT, aC, aF, -aT, aC, -aF, aT, -aC, aF, -aT, aC, -aF, aT]
+
+# phase [s]
+pC = 0.0   # Phase for the "base" motors.
+pF = 2.0   # Phase for the "shoulder" motors.
+pT = 2.5   # Phase for the "knee" motors.
+p = [pC, pF, pT, pC, pF, pT, pC, pF, pT, pC, pF, pT, pC, pF, pT, pC, pF, pT]
+
+# offset [rad]
+dC = 0.6    # Offset for the "base" motors.
+dF = 0.8    # Offset for the "shoulder" motors.
+dT = -2.4   # Offset for the "knee" motors.
+d = [-dC, dF, dT, 0.0, dF, dT, dC, dF, dT, dC, dF, dT, 0.0, dF, dT, -dC, dF, dT]
+
+time_step = int(robot.getBasicTimeStep())
+
+while robot.step(time_step) != -1:
+    time = robot.getTime()
+    for i in range(18):  # Apply a sinuosidal function for each motor.
+        motors[i].setPosition(a[i] * math.sin(2.0 * math.pi * f * time + p[i]) + d[i])
